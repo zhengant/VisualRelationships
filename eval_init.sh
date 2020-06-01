@@ -8,7 +8,7 @@ metric=BLEU
 
 # model from 'init', 'newheads', 'newcross', 'dynamic', which are the four model in paper 
 # related to the four subsections in the paper
-model=newcross
+model=init
 
 # Name of the model, used in snapshot
 name=${model}_2pixel
@@ -27,8 +27,8 @@ cp $0 snap/$log_dir/run.bash
 cp -r src snap/$log_dir/src
 
 CUDA_VISIBLE_DEVICES=$gpu stdbuf -i0 -o0 -e0 python src/main.py --output snap/$log_dir \
-    --maxInput 40 --metric $metric --model $model --imgType pixel --worker 4 --train speaker --dataset $dataset \
+    --maxInput 40 --metric $metric --model $model --imgType pixel --worker 4 --train testspeaker --dataset $dataset \
     --batchSize 95 --hidDim 512 --dropout 0.5 \
     --seed 9595 \
     --optim adam --lr 1e-4 --epochs 500 \
-    | tee log/$log_dir.log
+    --load /home/jzda/VisualRelationships/snap/fake_media/speaker/init_2pixel/best_eval

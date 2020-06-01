@@ -8,7 +8,7 @@ metric=BLEU
 
 # model from 'init', 'newheads', 'newcross', 'dynamic', which are the four model in paper 
 # related to the four subsections in the paper
-model=newcross
+model=init
 
 # Name of the model, used in snapshot
 name=${model}_2pixel
