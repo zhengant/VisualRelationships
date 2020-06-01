@@ -24,6 +24,18 @@ img_transform = transforms.Compose([
     normalize
 ])
 
+SEED_PHRASES = [
+    'MP1 would',
+    'Someone might mistakenly believe that MP1',
+    'Editor created this edit to',
+    'This edit could potentially be used to',
+    'In regards to the edit as a whole, this edit might mislead someone into believing that',
+    'MP2 would',
+    'Someone might mistakenly believe that MP2',
+    'MP3 would',
+    'Someone might mistakenly believe that MP3'
+]
+
 # Change workers
 if args.img_type == 'pixel':
     args.workers = 1    # In Memory Loading
@@ -36,6 +48,7 @@ def get_tuple(ds_name, split, task='speaker', shuffle=True, drop_last=True):
     torch_ds = TorchDataset(dataset, task, max_length=args.max_input,
         img0_transform=img_transform, img1_transform=img_transform
     )
+
     # if args.fast:
     #     torch_ds = torch.utils.data.Subset(torch_ds, range(1000))
     print("The size of data split %s is %d" % (split, len(torch_ds)))
@@ -49,29 +62,58 @@ def get_tuple(ds_name, split, task='speaker', shuffle=True, drop_last=True):
 if 'speaker' in args.train:
     train_tuple = get_tuple(args.dataset, 'train', shuffle=False, drop_last=True)
     valid_tuple = get_tuple(args.dataset, 'valid', shuffle=False, drop_last=False)
+    
+
     speaker = Speaker(train_tuple[0])   # [0] is the dataset
+    seed_sents_idxs = [train_tuple[0].tok.encode(sent) for sent in SEED_PHRASES]
     if args.load is not None:
         print("Load speaker from %s." % args.load)
         speaker.load(args.load)
-        scores, result = speaker.evaluate(valid_tuple)
-        print("Have result for %d data" % len(result))
-        print("The validation result is:")
-        print(scores)
+
+        # # get predictions
+        # preds = {}
+        # for seed_idxs in seed_sents_idxs:
+        #     scores, result, loss = speaker.evaluate(valid_tuple, preds_dict=preds, seed_idxs=seed_idxs)
+
+        # # print results
+        # print("Have result for %d data" % len(result))
+        # print("The validation result is:")
+        # print(scores)
+        # print('Perplexity:', np.exp(loss))
+
+        # # output preds
+        # import json
+        # json.dump(preds, open("valid_captions_" + args.model + ".json", 'w'))
     if args.train == 'speaker':
         speaker.train(train_tuple, valid_tuple, args.epochs)
     if args.train == 'rlspeaker':
         speaker.train(train_tuple, valid_tuple, args.epochs, rl=True)
     elif args.train == 'validspeaker':
-        scores, result = speaker.evaluate(valid_tuple)
+        scores, result, loss = speaker.evaluate(valid_tuple, preds_dict=preds)
+        print("Have result for %d data" % len(result))
+        print("The validation result is:")
         print(scores)
+        print('Perplexity:', np.exp(loss))
+        import json
+        json.dump(preds, open("valid_captions_" + args.model + ".json", 'w'))
     elif args.train == 'testspeaker':
         test_tuple = get_tuple(args.dataset, 'test', shuffle=False, drop_last=False)
-        scores, result = speaker.evaluate(test_tuple)
+
+        # get preds
+        preds = {}
+        for seed_idxs in seed_sents_idxs:
+            scores, result, loss = speaker.evaluate(test_tuple, preds_dict=preds, seed_idxs=seed_idxs)
+        
+        # show results
         print("Test:")
         print("Have result for %d data" % len(result))
         print(scores)
+        print('Perplexity:', np.exp(loss))
+
+        # output preds
         import json
-        json.dump(result, open("test_result.json", 'w'))
+        # json.dump(result, open("test_result.json", 'w'))
+        json.dump(preds, open("test_captions_" + args.model + ".json", "w"))
 elif 'nlvr' in args.train:
     train_tuple = get_tuple(args.dataset, 'train', task='nlvr', shuffle=False, drop_last=True)
     valid_tuple = get_tuple(args.dataset, 'valid', task='nlvr', shuffle=False, drop_last=False)

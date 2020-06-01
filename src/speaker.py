@@ -14,7 +14,8 @@ from param import args
 import numpy as np
 from evaluate import LangEvaluator
 import utils
-from tqdm import tqdm
+from tqdm import tqdm, trange
+import numpy as np
 
 class Speaker:
     def __init__(self, dataset):
@@ -78,10 +79,11 @@ class Speaker:
         train_evaluator = LangEvaluator(train_ds)
         reward_func = lambda uidXpred: train_evaluator.get_reward(uidXpred, args.metric)
 
-        for epoch in range(num_epochs):
+        for epoch in trange(num_epochs, desc='Epoch'):
             print()
             iterator = tqdm(enumerate(train_loader), total=len(train_tds)//args.batch_size, unit="batch")
             word_accu = 0.
+            losses = []
             for i, (uid, src, trg, inst, leng) in iterator:
                 inst = utils.cut_inst_with_leng(inst, leng)
                 # utils.show_case(src[0], trg[0], inst[0], self.tok, os.path.expanduser("~/tmp/speaker/train%d" % i))
@@ -98,6 +100,8 @@ class Speaker:
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.decoder.parameters(), 5.)
                 self.optim.step()
+                losses.append(loss.item())
+            self.writer.add_scalar('Loss', np.mean(losses), epoch)
             word_accu /= (i + 1)        # i is the number of batches, if batch_size != 0
             print("Epoch %d, Training Word Accuracy %0.4f" % (epoch, word_accu))
 
@@ -229,7 +233,7 @@ class Speaker:
 
         return loss, word_accu
 
-    def infer_batch(self, src, trg, sampling=True, train=False):
+    def infer_batch(self, src, trg, sampling=True, train=False, seed_idxs=None):
         """
         :param src:  src images (b x 224 x 224 x 3)?
         :param trg:  trg images
@@ -265,18 +269,25 @@ class Speaker:
             logits = logits.squeeze()                                       # logits: (b, vocab_size)
             # if not sampling:
             logits[:, self.tok.unk_id] = -float("inf")                      # No <UNK> in infer
-            if sampling:
-                probs = F.softmax(logits, -1)
-                # print(logits)
-                # print(logits.max())
-                m = Categorical(probs)
-                word = m.sample()
-                if train:
-                    log_probs.append(m.log_prob(word))
-                    hiddens.append(h_t)
-                    entropies.append(m.entropy())
+            
+            # seed first few tokens
+            # +1/-1 on indexing into seed to account for first <BOS> token
+            if seed_idxs and len(words) < len(seed_idxs) + 1:
+                word = np.ones(batch_size, np.int64) * seed_idxs[len(words) - 1]
+                word = torch.from_numpy(word).cuda()
             else:
-                values, word = logits.max(1)
+                if sampling:
+                    probs = F.softmax(logits, -1)
+                    # print(logits)
+                    # print(logits.max())
+                    m = Categorical(probs)
+                    word = m.sample()
+                    if train:
+                        log_probs.append(m.log_prob(word))
+                        hiddens.append(h_t)
+                        entropies.append(m.entropy())
+                else:
+                    values, word = logits.max(1)
 
             # Append the word
             cpu_word = word.to(device).numpy()
@@ -296,7 +307,7 @@ class Speaker:
         else:
             return np.stack(words, 1)       # [(b), (b), (b), ...] --> [b, l]
 
-    def evaluate(self, eval_tuple, iters=-1):
+    def evaluate(self, eval_tuple, iters=-1, preds_dict=None, seed_idxs=None):
         dataset, th_dset, dataloader = eval_tuple
         evaluator = LangEvaluator(dataset)
 
@@ -305,6 +316,10 @@ class Speaker:
         all_gts = []
         uids = []
         word_accu = 0.
+        losses = []
+
+        uids_done = set()
+
         for i, (uid, src, trg, inst, leng) in enumerate(dataloader):
             if i == iters:
                 break
@@ -312,19 +327,33 @@ class Speaker:
             src, trg = src.cuda(), trg.cuda()
 
             # get sentence level predictions
-            infer_inst = self.infer_batch(src, trg, sampling=False, train=False)
+            infer_inst = self.infer_batch(src, trg, sampling=False, train=False, seed_idxs=seed_idxs)
             all_insts.extend(infer_inst)
             all_gts.extend(inst.cpu().numpy())
             uids.extend(uid)
 
             # Calculate word level accuracy
             inst = inst.cuda()
-            _, batch_accu = self.teacher_forcing(src, trg, inst, leng, train=False)
+            loss, batch_accu = self.teacher_forcing(src, trg, inst, leng, train=False)
             word_accu += batch_accu
+            losses.append(loss.item())
+
+            # record predictions
+            if preds_dict is not None:
+                for j in range(infer_inst.shape[0]):
+                    this_uid = uid[j]
+                    if this_uid not in uids_done:
+                        sentence = self.tok.decode(self.tok.shrink(infer_inst[j]))
+                        if this_uid not in preds_dict:
+                            preds_dict[this_uid] = []
+                        
+                        preds_dict[this_uid].append(sentence)
+
+                        uids_done.add(this_uid)
         word_accu /= (i + 1)
 
         # Show the gt and predict seq
-        for _ in range(3):
+        for _ in range(1):
             import random
             i = random.randint(0, len(all_gts)-1)
             print('GT:   ' + self.tok.decode(self.tok.shrink(all_gts[i])))
@@ -339,6 +368,9 @@ class Speaker:
         scores = evaluator.evaluate(uid2pred)
         # print(len(evaluator.uid2ref))
         scores['word_accu'] = word_accu
+
+        if preds_dict is not None:
+            return scores, uid2pred, np.mean(losses)
 
         return scores, uid2pred
 
