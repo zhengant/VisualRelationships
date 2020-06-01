@@ -39,9 +39,10 @@ for p in resnet_extractor.parameters():
     p.requires_grad = False
 
 DATASETS = [
-        'nlvr2',
-        'spotdiff',
-        'adobe',
+        # 'nlvr2',
+        # 'spotdiff',
+        # 'adobe',
+        'fake_media'
 ]
 
 ds_root = "../dataset/"

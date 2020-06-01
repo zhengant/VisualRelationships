@@ -5,9 +5,10 @@ from tok import Tokenizer
 import json
 
 DATASETS = [
-        'nlvr2',
-        'spotdiff',
-        'adobe',
+        # 'nlvr2',
+        # 'spotdiff',
+        # 'adobe',
+        'fake_media'
 ]
 
 ds_root = "../dataset/"
